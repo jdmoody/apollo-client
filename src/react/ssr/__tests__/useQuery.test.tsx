@@ -6,7 +6,7 @@ import { ApolloClient } from '../../../core';
 import { InMemoryCache } from '../../../cache';
 import { ApolloProvider } from '../../context';
 import { useQuery } from '../../hooks';
-import { render, wait } from '@testing-library/react';
+import { act, render, wait } from '@testing-library/react';
 import { renderToStringWithData } from '..';
 
 describe('useQuery Hook SSR', () => {
@@ -40,7 +40,7 @@ describe('useQuery Hook SSR', () => {
     }
   ];
 
-  it('should support SSR', () => {
+  it('should support SSR', async () => {
     const Component = () => {
       const { loading, data } = useQuery(CAR_QUERY);
       if (!loading) {
@@ -55,15 +55,37 @@ describe('useQuery Hook SSR', () => {
       return null;
     };
 
-    const app = (
-      <MockedProvider mocks={CAR_MOCKS}>
+    const serverCache = new InMemoryCache()
+    const serverApp = (
+      <MockedProvider cache={serverCache} mocks={CAR_MOCKS}>
         <Component />
       </MockedProvider>
     );
 
-    return renderToStringWithData(app).then(markup => {
-      expect(markup).toMatch(/Audi/);
-    });
+    const markup = await renderToStringWithData(serverApp)
+    expect(markup).toMatch(/Audi/);
+
+    const state = serverCache.extract()
+    const clientCache = new InMemoryCache().restore(state)
+    const clientApp = (
+      <MockedProvider cache={clientCache}>
+        <Component />
+      </MockedProvider>
+    );
+
+    // Create a container to hydrate
+    const clientContainer = document.body.appendChild(
+      document.createElement("div")
+    );
+    // Put the server-rendered markup into the container
+    clientContainer.innerHTML = markup;
+
+    const consoleErrorSpy = jest.spyOn(console, 'error')
+    await act(async () => {
+      await render(clientApp, {container: clientContainer, hydrate: true})
+    })
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
   });
 
   it('should initialize data as `undefined` when loading', () => {
